@@ -6,6 +6,7 @@ class ApiResponder
 {
     public static function failureResponse($message, $code, $verification_errors = null)
     {
+
         return response()->json(
             [
                 "success" => false,

@@ -2,41 +2,62 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Helpers\ApiResponder;
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Providers\RouteServiceProvider;
+use App\Repositories\Contracts\IUser;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Auth\VerifiesEmails;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
 
 class VerificationController extends Controller
 {
-    /*
-    |--------------------------------------------------------------------------
-    | Email Verification Controller
-    |--------------------------------------------------------------------------
-    |
-    | This controller is responsible for handling email verification for any
-    | user that recently registered with the application. Emails may also
-    | be re-sent if the user didn't receive the original email message.
-    |
-    */
+    protected $users;
 
-    use VerifiesEmails;
-
-    /**
-     * Where to redirect users after verification.
-     *
-     * @var string
-     */
-    protected $redirectTo = RouteServiceProvider::HOME;
-
-    /**
-     * Create a new controller instance.
-     *
-     * @return void
-     */
-    public function __construct()
+    public function __construct(IUser $users)
     {
-        $this->middleware('auth');
-        $this->middleware('signed')->only('verify');
         $this->middleware('throttle:6,1')->only('verify', 'resend');
+
+        $this->users = $users;
+    }
+
+    public function verify(Request $request, User $user)
+    {
+        //check if url is a valid signed url
+        if (!URL::hasValidSignature($request)) {
+            return ApiResponder::failureResponse("Invalid verification link or signature", 422);
+        }
+
+        //check if user has already verified email
+        if ($user->hasVerifiedEmail()) {
+            return ApiResponder::failureResponse("Email address already verified", 422);
+        }
+
+        $user->markEmailAsVerified();
+
+        event(new Verified($user));
+
+        return ApiResponder::successResponse("Email successfully verified");
+    }
+
+    public function resend(Request $request)
+    {
+        $this->validate($request, ['email' => ['required', 'email']]);
+
+        $user = $this->users->findWhere('email', $request->email);
+
+        if (!$user) {
+            return ApiResponder::failureResponse("No user could be found with this email address", 422);
+        }
+        //check if user has already verified email
+        if ($user->hasVerifiedEmail()) {
+            return ApiResponder::failureResponse("Email address already verified", 422);
+        }
+
+        $user->sendEmailVerificationNotification();
+
+        return ApiResponder::successResponse("Verification link resent");
     }
 }
